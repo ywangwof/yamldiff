@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aligned YAML Diff Viewer</title>
+    <link rel="manifest" href="manifest.json">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+    <style>
+        /* --- Global Layout --- */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 10px;
+            background-color: #f4f4f9;
+            color: #333;
+            height: 100vh;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* --- Controls --- */
+        .controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 10px;
+            background: white;
+            padding: 10px 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            flex-shrink: 0;
+        }
+
+        button {
+            padding: 8px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        /* --- Diff Container --- */
+        .diff-container {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border: 1px solid #ccc;
+        }
+
+        .diff-header {
+            display: flex;
+            background: #e9ecef;
+            font-weight: bold;
+            border-bottom: 2px solid #ddd;
+            flex-shrink: 0;
+        }
+        .header-cell {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            width: 50%;
+        }
+        .header-cell:first-child { border-right: 1px solid #ccc; }
+
+        .diff-body {
+            flex: 1;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            padding-bottom: 20px;
+        }
+
+        /* --- Tree / Row Styling --- */
+        ul { list-style: none; margin: 0; padding: 0; }
+
+        .tree-row { display: flex; border-bottom: 1px solid #eee; }
+        .tree-row:hover { background-color: #f9f9f9; }
+
+        .cell {
+            flex: 1;
+            width: 50%;
+            padding: 4px 8px;
+            box-sizing: border-box;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: flex;
+            align-items: center;
+        }
+        .cell.left { border-right: 1px solid #ddd; }
+
+        .bg-added { background-color: #e6ffec; }
+        .bg-removed { background-color: #ffebe9; }
+        .bg-changed { background-color: #fff5b1; }
+        .bg-empty {
+            background-color: #fcfcfc;
+            background-image: repeating-linear-gradient(45deg, #fcfcfc 0, #fcfcfc 10px, #f4f4f4 10px, #f4f4f4 20px);
+        }
+
+        .key { color: #2c3e50; font-weight: 600; }
+        .value { color: #0366d6; margin-left: 5px; }
+        .value.string { color: #22863a; }
+        .value.number { color: #005cc5; }
+        .value.boolean { color: #d73a49; }
+        .value.null { color: #999; }
+
+        .nested { display: none; }
+        .active { display: block; }
+
+        .caret {
+            display: inline-block;
+            width: 14px;
+            text-align: center;
+            cursor: pointer;
+            user-select: none;
+            font-weight: bold;
+            margin-right: 5px;
+            color: #555;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            background: #fff;
+            line-height: 12px;
+            height: 14px;
+        }
+        .caret::before { content: "+"; }
+        .caret-down::before { content: "-"; }
+        .spacer { display: inline-block; width: 14px; margin-right: 5px; }
+
+        .msg { padding: 20px; text-align: center; color: #888; }
+    </style>
+</head>
+<body>
+
+    <div class="controls">
+        <input type="file" id="file1">
+        <button id="compareBtn" onclick="manualCompare()">Compare</button>
+        <input type="file" id="file2">
+    </div>
+
+    <div class="diff-container">
+        <div class="diff-header">
+            <div class="header-cell">Original (Left)</div>
+            <div class="header-cell">Modified (Right)</div>
+        </div>
+        <div class="diff-body" id="tree-root">
+            <div class="msg">Select files to compare</div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. Service Worker ---
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register(`./sw.js?v=${Date.now()}`).catch(console.error);
+        }
+
+        // --- 2. CLI / File Handling ---
+        if ('launchQueue' in window) {
+            launchQueue.setConsumer(async (launchParams) => {
+                if (launchParams.files.length >= 2) {
+                    try {
+                        const h1 = launchParams.files[0];
+                        const h2 = launchParams.files[1];
+
+                        // Permission prompt happens here
+                        const f1 = await h1.getFile();
+                        const f2 = await h2.getFile();
+
+                        // --- UPDATE INPUT FIELDS UI ---
+                        // We use DataTransfer to simulate a user dropping files into the inputs
+                        const dt1 = new DataTransfer();
+                        dt1.items.add(f1);
+                        document.getElementById('file1').files = dt1.files;
+
+                        const dt2 = new DataTransfer();
+                        dt2.items.add(f2);
+                        document.getElementById('file2').files = dt2.files;
+                        // ------------------------------
+
+                        document.getElementById('tree-root').innerHTML = `<div class="msg">Processing ${f1.name} vs ${f2.name}...</div>`;
+
+                        const t1 = await readFile(f1);
+                        const t2 = await readFile(f2);
+                        process(t1, t2);
+
+                    } catch (err) {
+                        alert("Error opening files: " + err.message);
+                    }
+                }
+            });
+        }
+
+        // --- 3. Main Logic ---
+        function readFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = e => reject(e);
+                reader.readAsText(file);
+            });
+        }
+
+        async function manualCompare() {
+            const f1 = document.getElementById('file1').files[0];
+            const f2 = document.getElementById('file2').files[0];
+            if (!f1 || !f2) { alert("Please select files."); return; }
+
+            document.getElementById('tree-root').innerHTML = '<div class="msg">Processing...</div>';
+            try {
+                const t1 = await readFile(f1);
+                const t2 = await readFile(f2);
+                process(t1, t2);
+            } catch (e) { alert(e.message); }
+        }
+
+        async function process(t1, t2) {
+            // Wait loop for library
+            if (!window.jsyaml) {
+                 await new Promise(resolve => {
+                     const i = setInterval(() => {
+                         if(window.jsyaml) { clearInterval(i); resolve(); }
+                     }, 50);
+                 });
+            }
+
+            try {
+                const o1 = jsyaml.load(t1);
+                const o2 = jsyaml.load(t2);
+                const diff = compareObjects(o1, o2);
+
+                const root = document.getElementById('tree-root');
+                root.innerHTML = '';
+                root.appendChild(renderTree(diff, 0));
+            } catch (e) {
+                document.getElementById('tree-root').innerHTML = `<div class="msg" style="color:red">YAML Error: ${e.message}</div>`;
+            }
+        }
+
+        // --- 4. Diff Logic ---
+        function naturalSort(a, b) {
+            return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+        }
+
+        function compareObjects(o1, o2) {
+            const keys1 = (o1 && typeof o1 === 'object') ? Object.keys(o1) : [];
+            const keys2 = (o2 && typeof o2 === 'object') ? Object.keys(o2) : [];
+            const allKeys = Array.from(new Set([...keys1, ...keys2])).sort(naturalSort);
+
+            if (!isObject(o1) || !isObject(o2)) {
+                if (o1 === o2) return { type: 'val', val: o1, status: 'same' };
+                return { type: 'val', val1: o1, val2: o2, status: 'modified' };
+            }
+
+            const children = [];
+            allKeys.forEach(key => {
+                const val1 = o1[key];
+                const val2 = o2[key];
+
+                if (val1 === undefined && val2 !== undefined) {
+                    children.push({ key, val: val2, status: 'added', type: isObject(val2) ? 'obj' : 'val' });
+                } else if (val1 !== undefined && val2 === undefined) {
+                    children.push({ key, val: val1, status: 'removed', type: isObject(val1) ? 'obj' : 'val' });
+                } else {
+                    if (isObject(val1) && isObject(val2)) {
+                        const subDiff = compareObjects(val1, val2);
+                        const st = subDiff.some(n => n.status !== 'same') ? 'nested-modified' : 'same';
+                        children.push({ key, children: subDiff, status: st, type: 'obj' });
+                    } else if (val1 !== val2) {
+                        children.push({ key, val1: val1, val2: val2, status: 'modified', type: 'val' });
+                    } else {
+                        children.push({ key, val: val1, status: 'same', type: isObject(val1) ? 'obj' : 'val' });
+                    }
+                }
+            });
+            return children;
+        }
+
+        function isObject(val) { return val !== null && typeof val === 'object'; }
+
+        // --- 5. Unified Rendering ---
+        function renderTree(nodes, depth) {
+            const ul = document.createElement('ul');
+            nodes.forEach(node => {
+                const li = document.createElement('li');
+                const row = document.createElement('div');
+                row.className = 'tree-row';
+
+                let leftClass = 'cell left';
+                let rightClass = 'cell right';
+
+                if (node.status === 'added') leftClass += ' bg-empty';
+                if (node.status === 'removed') { leftClass += ' bg-removed'; rightClass += ' bg-empty'; }
+                if (node.status === 'added') rightClass += ' bg-added';
+                if (node.status === 'modified' || node.status === 'nested-modified') {
+                    leftClass += ' bg-changed';
+                    rightClass += ' bg-changed';
+                }
+
+                const leftCell = document.createElement('div');
+                leftCell.className = leftClass;
+                leftCell.style.paddingLeft = (depth * 20 + 5) + 'px';
+
+                const rightCell = document.createElement('div');
+                rightCell.className = rightClass;
+                rightCell.style.paddingLeft = (depth * 20 + 5) + 'px';
+
+                const hasChildren = (node.type === 'obj');
+                let caret = null;
+                if (hasChildren) {
+                    caret = document.createElement('span');
+                    caret.className = 'caret';
+                    caret.onclick = (e) => {
+                        const siblingUL = row.nextElementSibling;
+                        if(siblingUL) siblingUL.classList.toggle('active');
+                        const c1 = row.querySelector('.left .caret');
+                        const c2 = row.querySelector('.right .caret');
+                        if(c1) c1.classList.toggle('caret-down');
+                        if(c2) c2.classList.toggle('caret-down');
+                        e.stopPropagation();
+                    };
+                } else {
+                    caret = document.createElement('span');
+                    caret.className = 'spacer';
+                }
+
+                const leftCaret = caret.cloneNode(true);
+                const rightCaret = caret.cloneNode(true);
+                if(hasChildren) {
+                    const toggleFn = (e) => {
+                         const siblingUL = row.nextElementSibling;
+                         if(siblingUL) siblingUL.classList.toggle('active');
+                         const c1 = row.querySelector('.left .caret');
+                         const c2 = row.querySelector('.right .caret');
+                         if(c1) c1.classList.toggle('caret-down');
+                         if(c2) c2.classList.toggle('caret-down');
+                         e.stopPropagation();
+                    };
+                    leftCaret.onclick = toggleFn;
+                    rightCaret.onclick = toggleFn;
+                }
+
+                if (node.status !== 'added') {
+                    leftCell.appendChild(leftCaret);
+                    leftCell.appendChild(createKeySpan(node.key));
+                    if (node.type === 'val') {
+                         const val = (node.status === 'modified') ? node.val1 : node.val;
+                         leftCell.appendChild(createValueSpan(val));
+                    }
+                }
+
+                if (node.status !== 'removed') {
+                    rightCell.appendChild(rightCaret);
+                    rightCell.appendChild(createKeySpan(node.key));
+                    if (node.type === 'val') {
+                        const val = (node.status === 'modified') ? node.val2 : node.val;
+                        rightCell.appendChild(createValueSpan(val));
+                    }
+                }
+
+                row.appendChild(leftCell);
+                row.appendChild(rightCell);
+                li.appendChild(row);
+
+                if (hasChildren) {
+                    let childrenUL;
+                    if (node.children && Array.isArray(node.children)) {
+                        childrenUL = renderTree(node.children, depth + 1);
+                    } else if (isObject(node.val)) {
+                        const side = (node.status === 'added') ? 'right' : 'left';
+                        childrenUL = renderStaticObject(node.val, depth + 1, side, node.status);
+                    }
+                    if (childrenUL) {
+                        childrenUL.classList.add('nested');
+                        li.appendChild(childrenUL);
+                    }
+                }
+                ul.appendChild(li);
+            });
+            return ul;
+        }
+
+        function renderStaticObject(obj, depth, side, status) {
+            const ul = document.createElement('ul');
+            const keys = Object.keys(obj).sort(naturalSort);
+            keys.forEach(key => {
+                const val = obj[key];
+                const isObj = isObject(val);
+                const li = document.createElement('li');
+                const row = document.createElement('div');
+                row.className = 'tree-row';
+                const leftCell = document.createElement('div');
+                leftCell.className = `cell left ${status === 'removed' ? 'bg-removed' : 'bg-empty'}`;
+                leftCell.style.paddingLeft = (depth * 20 + 5) + 'px';
+                const rightCell = document.createElement('div');
+                rightCell.className = `cell right ${status === 'added' ? 'bg-added' : 'bg-empty'}`;
+                rightCell.style.paddingLeft = (depth * 20 + 5) + 'px';
+                let caret = document.createElement('span');
+                if (isObj) {
+                    caret.className = 'caret';
+                    caret.onclick = () => {
+                        const sibling = row.nextElementSibling;
+                        if (sibling) sibling.classList.toggle('active');
+                        const c1 = row.querySelector('.left .caret');
+                        const c2 = row.querySelector('.right .caret');
+                        if(c1) c1.classList.toggle('caret-down');
+                        if(c2) c2.classList.toggle('caret-down');
+                    };
+                } else { caret.className = 'spacer'; }
+                const keySpan = createKeySpan(key);
+                const valSpan = !isObj ? createValueSpan(val) : null;
+                const activeCell = (side === 'left') ? leftCell : rightCell;
+                activeCell.appendChild(caret);
+                activeCell.appendChild(keySpan);
+                if (valSpan) activeCell.appendChild(valSpan);
+                row.appendChild(leftCell);
+                row.appendChild(rightCell);
+                li.appendChild(row);
+                if (isObj) {
+                    const childUL = renderStaticObject(val, depth + 1, side, status);
+                    childUL.classList.add('nested');
+                    li.appendChild(childUL);
+                }
+                ul.appendChild(li);
+            });
+            return ul;
+        }
+
+        function createKeySpan(key) { const s = document.createElement('span'); s.className = 'key'; s.textContent = key + ': '; return s; }
+        function createValueSpan(val) {
+            const s = document.createElement('span'); s.classList.add('value');
+            if (typeof val === 'string') { s.classList.add('string'); s.textContent = `"${val}"`; }
+            else if (typeof val === 'number') { s.classList.add('number'); s.textContent = val; }
+            else if (typeof val === 'boolean') { s.classList.add('boolean'); s.textContent = val; }
+            else if (val === null) { s.classList.add('null'); s.textContent = 'null'; }
+            else { s.textContent = val; }
+            return s;
+        }
+    </script>
+</body>
+</html>
