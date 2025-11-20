@@ -18,7 +18,7 @@ PWAs will not work if you just double-click `index.html` from your file explorer
 
 ## Command line support
 
-#open -a "YAML Diff Viewer" --args "/abs/path/to/file1.yaml" "/abs/path/to/file2.yaml"
-# not work because of file handler issue
+  % open -a "YAML Diff Viewer" --args "/abs/path/to/file1.yaml" "/abs/path/to/file2.yaml"
+  % not work because of file handler issue
 
-alias yamldiff='/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --app-id=ebkggbkgjehkpdoekihefdnkghbnjeko'
+  alias yamldiff='/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --app-id=ebkggbkgjehkpdoekihefdnkghbnjeko'
