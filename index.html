@@ -16,7 +16,7 @@
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
-            padding: 20px;
+            padding: 10px; /* Reduced padding */
             background-color: #f4f4f9;
             color: #333;
             height: 100vh;
@@ -25,35 +25,61 @@
             flex-direction: column;
         }
 
-        h2 { text-align: center; margin: 0 0 20px 0; }
-
         /* --- Controls --- */
         .controls {
             display: flex;
             justify-content: center;
+            align-items: center;
             gap: 20px;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
             background: white;
-            padding: 15px;
+            padding: 10px 15px;
             border-radius: 8px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
             flex-shrink: 0;
+            flex-wrap: wrap; /* Allow wrapping on very small screens */
         }
 
-        .file-input-group { display: flex; flex-direction: column; }
-        label { font-weight: bold; margin-bottom: 5px; font-size: 0.9rem; }
+        .file-input-group {
+            display: flex;
+            flex-direction: row; /* Layout items horizontally */
+            align-items: center; /* Vertically center label and input */
+            gap: 10px; /* Space between label and input */
+        }
+
+        label {
+            font-weight: bold;
+            font-size: 0.9rem;
+            margin: 0; /* Remove default margins */
+            white-space: nowrap;
+        }
+
+        /* File Input Styling */
+        input[type="file"] {
+            font-size: 0.9rem;
+            color: #333;
+            width: 220px; /* Ensure consistent width */
+        }
 
         button {
-            padding: 10px 20px;
+            padding: 8px 20px;
             background-color: #007bff;
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            align-self: center;
             font-size: 1rem;
+            transition: background-color 0.3s ease;
         }
-        button:hover { background-color: #0056b3; }
+        button:hover:not(:disabled) { background-color: #0056b3; }
+
+        /* Disabled Button Style */
+        button:disabled {
+            background-color: #ccc;
+            color: #666;
+            cursor: not-allowed;
+            border: 1px solid #bbb;
+        }
 
         /* --- Split View Container --- */
         .diff-container {
@@ -93,16 +119,9 @@
         }
 
         /* --- Tree Row Styling --- */
-        ul {
-            list-style-type: none;
-            margin: 0;
-            padding: 0;
-        }
+        ul { list-style-type: none; margin: 0; padding: 0; }
 
-        .tree-row {
-            display: flex;
-            border-bottom: 1px solid #eee;
-        }
+        .tree-row { display: flex; border-bottom: 1px solid #eee; }
         .tree-row:hover { background-color: #f9f9f9; }
 
         .cell {
@@ -158,16 +177,16 @@
 </head>
 <body>
 
-    <h2>Aligned YAML Diff Viewer</h2>
-
     <div class="controls">
         <div class="file-input-group">
-            <label for="file1">Original File (Left)</label>
+            <label for="file1">Original File (Left):</label>
             <input type="file" id="file1" accept=".yaml,.yml">
         </div>
-        <button onclick="processFiles()">Compare Files</button>
+
+        <button id="compareBtn" onclick="processFiles()" disabled>Compare Files</button>
+
         <div class="file-input-group">
-            <label for="file2">Modified File (Right)</label>
+            <label for="file2">Modified File (Right):</label>
             <input type="file" id="file2" accept=".yaml,.yml">
         </div>
     </div>
@@ -178,7 +197,7 @@
             <div class="header-cell">Right Panel</div>
         </div>
         <div class="diff-body" id="tree-root">
-            <div style="padding:20px; text-align:center; color:#888;">Select two files and click Compare to view diff.</div>
+            <div style="padding:20px; text-align:center; color:#888;">Select two files to begin comparison.</div>
         </div>
     </div>
 
@@ -187,10 +206,26 @@
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js')
-                    .then(reg => console.log('Service Worker Registered'))
                     .catch(err => console.log('Service Worker Error:', err));
             });
         }
+
+        // --- Button State Logic ---
+        const file1Input = document.getElementById('file1');
+        const file2Input = document.getElementById('file2');
+        const compareBtn = document.getElementById('compareBtn');
+
+        function checkInputs() {
+            // Enable button only if both inputs have files
+            if (file1Input.files.length > 0 && file2Input.files.length > 0) {
+                compareBtn.disabled = false;
+            } else {
+                compareBtn.disabled = true;
+            }
+        }
+
+        file1Input.addEventListener('change', checkInputs);
+        file2Input.addEventListener('change', checkInputs);
 
         // --- Application Logic ---
         function readFile(file) {
@@ -203,11 +238,11 @@
         }
 
         async function processFiles() {
-            const f1 = document.getElementById('file1').files[0];
-            const f2 = document.getElementById('file2').files[0];
+            const f1 = file1Input.files[0];
+            const f2 = file2Input.files[0];
             const root = document.getElementById('tree-root');
 
-            if (!f1 || !f2) { alert("Please select both files."); return; }
+            if (!f1 || !f2) return; // Should be handled by button disable, but double check
 
             root.innerHTML = 'Loading...';
 

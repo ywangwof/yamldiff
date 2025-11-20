@@ -1,4 +1,4 @@
-const CACHE_NAME = 'yaml-diff-v1';
+const CACHE_NAME = 'yaml-diff-v2';
 const ASSETS = [
   './',
   './index.html',
