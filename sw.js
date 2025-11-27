@@ -1,5 +1,5 @@
-// Update version to v4
-const CACHE_NAME = 'yaml-diff-v4';
+// Update version to v5 to force reload
+const CACHE_NAME = 'yaml-diff-v5';
 
 const ASSETS = [
   './',

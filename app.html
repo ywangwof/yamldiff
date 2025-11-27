@@ -70,6 +70,9 @@
             padding: 10px;
             text-align: center;
             width: 50%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .header-cell:first-child { border-right: 1px solid #ccc; }
 
@@ -150,8 +153,8 @@
 
     <div class="diff-container">
         <div class="diff-header">
-            <div class="header-cell">Original (Left)</div>
-            <div class="header-cell">Modified (Right)</div>
+            <div class="header-cell" id="header-left">Original (Left)</div>
+            <div class="header-cell" id="header-right">Modified (Right)</div>
         </div>
         <div class="diff-body" id="tree-root">
             <div class="msg">Select files to compare</div>
@@ -164,7 +167,24 @@
             navigator.serviceWorker.register(`./sw.js?v=${Date.now()}`).catch(console.error);
         }
 
-        // --- 2. CLI / File Handling ---
+        // --- 2. Helpers ---
+        function updateHeaders(name1, name2) {
+            document.getElementById('header-left').textContent = name1;
+            document.getElementById('header-right').textContent = name2;
+            // Optional: Update Title
+            document.title = `${name1} vs ${name2}`;
+        }
+
+        function readFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => resolve(e.target.result);
+                reader.onerror = e => reject(e);
+                reader.readAsText(file);
+            });
+        }
+
+        // --- 3. CLI / File Handling ---
         if ('launchQueue' in window) {
             launchQueue.setConsumer(async (launchParams) => {
                 if (launchParams.files.length >= 2) {
@@ -172,22 +192,20 @@
                         const h1 = launchParams.files[0];
                         const h2 = launchParams.files[1];
 
-                        // Permission prompt happens here
                         const f1 = await h1.getFile();
                         const f2 = await h2.getFile();
 
-                        // --- UPDATE INPUT FIELDS UI ---
-                        // We use DataTransfer to simulate a user dropping files into the inputs
-                        const dt1 = new DataTransfer();
-                        dt1.items.add(f1);
+                        // Update Input Fields
+                        const dt1 = new DataTransfer(); dt1.items.add(f1);
                         document.getElementById('file1').files = dt1.files;
 
-                        const dt2 = new DataTransfer();
-                        dt2.items.add(f2);
+                        const dt2 = new DataTransfer(); dt2.items.add(f2);
                         document.getElementById('file2').files = dt2.files;
-                        // ------------------------------
 
-                        document.getElementById('tree-root').innerHTML = `<div class="msg">Processing ${f1.name} vs ${f2.name}...</div>`;
+                        // Update Headers
+                        updateHeaders(f1.name, f2.name);
+
+                        document.getElementById('tree-root').innerHTML = `<div class="msg">Processing...</div>`;
 
                         const t1 = await readFile(f1);
                         const t2 = await readFile(f2);
@@ -200,20 +218,14 @@
             });
         }
 
-        // --- 3. Main Logic ---
-        function readFile(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = e => resolve(e.target.result);
-                reader.onerror = e => reject(e);
-                reader.readAsText(file);
-            });
-        }
-
+        // --- 4. Manual Input ---
         async function manualCompare() {
             const f1 = document.getElementById('file1').files[0];
             const f2 = document.getElementById('file2').files[0];
             if (!f1 || !f2) { alert("Please select files."); return; }
+
+            // Update Headers
+            updateHeaders(f1.name, f2.name);
 
             document.getElementById('tree-root').innerHTML = '<div class="msg">Processing...</div>';
             try {
@@ -223,6 +235,7 @@
             } catch (e) { alert(e.message); }
         }
 
+        // --- 5. Processing ---
         async function process(t1, t2) {
             // Wait loop for library
             if (!window.jsyaml) {
@@ -246,7 +259,7 @@
             }
         }
 
-        // --- 4. Diff Logic ---
+        // --- 6. Diff Logic ---
         function naturalSort(a, b) {
             return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
         }
@@ -287,7 +300,7 @@
 
         function isObject(val) { return val !== null && typeof val === 'object'; }
 
-        // --- 5. Unified Rendering ---
+        // --- 7. Rendering ---
         function renderTree(nodes, depth) {
             const ul = document.createElement('ul');
             nodes.forEach(node => {
